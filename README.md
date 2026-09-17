@@ -1,4 +1,4 @@
-# Roihu GPU container usage for Elmer 
+# Roihu GPU container for Elmer 
 
 The container installs
 1. MMG, ParMmg
