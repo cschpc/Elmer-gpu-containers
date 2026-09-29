@@ -46,6 +46,16 @@ From: satama.csc.fi/r_installation_spack/core-gpu-gcc-14.3.0-cuda-12.9.1:v2026_0
     dnf -y install epel-release || true
     dnf -y makecache || true
 
+    # -------------------------------------------------------------------------
+    # cuDSS 0.8.0, CUDA 12 build only (matches this image's CUDA 12.9.1
+    # toolkit; the plain "cudss" meta-package would also pull in an unused
+    # CUDA 13 build). NVIDIA's own network repo for RHEL9/aarch64 (SBSA)
+    # -------------------------------------------------------------------------
+    dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/sbsa/cuda-rhel9.repo
+    dnf clean all
+    dnf -y install libcudss0-devel-cuda-12 libcudss0-static-cuda-12
+    ldconfig
+
     dnf -y install \
         autoconf \
         automake \
@@ -183,6 +193,8 @@ From: satama.csc.fi/r_installation_spack/core-gpu-gcc-14.3.0-cuda-12.9.1:v2026_0
 /opt/parmmg/lib
 /opt/amgx/lib
 /opt/lua/lib
+/opt/mumps/lib64
+/opt/mumps/lib
 EOF
     ldconfig
 
@@ -191,10 +203,10 @@ EOF
 
     # Common build/runtime paths for locally built libraries.
     export PATH="/opt/elmer/bin:/opt/gmsh/bin:/opt/parmetis/bin:/opt/metis/bin:/opt/hypre/bin:/opt/nn/bin:/opt/csa/bin:/opt/mmg/bin:/opt/parmmg/bin:/opt/lua/bin:/opt/netcdf/bin:/opt/hdf5/bin:${PATH}"
-    export LD_LIBRARY_PATH="/opt/elmer/lib:/opt/gmsh/lib:/opt/parmetis/lib:/opt/metis/lib:/opt/hypre/lib:/opt/nn/lib:/opt/csa/lib:/opt/mmg/lib64:/opt/mmg/lib:/opt/parmmg/lib64:/opt/parmmg/lib:/opt/amgx/lib:/opt/lua/lib:/opt/netcdf/lib:/opt/hdf5/lib:${LD_LIBRARY_PATH:-}"
-    export LIBRARY_PATH="/opt/elmer/lib:/opt/gmsh/lib:/opt/parmetis/lib:/opt/metis/lib:/opt/hypre/lib:/opt/nn/lib:/opt/csa/lib:/opt/mmg/lib64:/opt/mmg/lib:/opt/parmmg/lib64:/opt/parmmg/lib:/opt/amgx/lib:/opt/lua/lib:/opt/netcdf/lib:/opt/hdf5/lib:${LIBRARY_PATH:-}"
-    export CPATH="/opt/parmetis/include:/opt/metis/include:/opt/hypre/include:/opt/nn/include:/opt/csa/include:/opt/mmg/include:/opt/parmmg/include:/opt/amgx/include:/opt/lua/include:/opt/netcdf/include:/opt/hdf5/include:${CPATH:-}"
-    export CMAKE_PREFIX_PATH="/opt/elmer:/opt/gmsh:/opt/parmetis:/opt/metis:/opt/hypre:/opt/nn:/opt/csa:/opt/mmg:/opt/parmmg:/opt/amgx:/opt/lua:/opt/netcdf:/opt/hdf5:${CMAKE_PREFIX_PATH:-}"
+    export LD_LIBRARY_PATH="/opt/elmer/lib:/opt/gmsh/lib:/opt/parmetis/lib:/opt/metis/lib:/opt/hypre/lib:/opt/nn/lib:/opt/csa/lib:/opt/mmg/lib64:/opt/mmg/lib:/opt/parmmg/lib64:/opt/parmmg/lib:/opt/amgx/lib:/opt/lua/lib:/opt/mumps/lib64:/opt/mumps/lib:/opt/netcdf/lib:/opt/hdf5/lib:${LD_LIBRARY_PATH:-}"
+    export LIBRARY_PATH="/opt/elmer/lib:/opt/gmsh/lib:/opt/parmetis/lib:/opt/metis/lib:/opt/hypre/lib:/opt/nn/lib:/opt/csa/lib:/opt/mmg/lib64:/opt/mmg/lib:/opt/parmmg/lib64:/opt/parmmg/lib:/opt/amgx/lib:/opt/lua/lib:/opt/mumps/lib64:/opt/mumps/lib:/opt/netcdf/lib:/opt/hdf5/lib:${LIBRARY_PATH:-}"
+    export CPATH="/opt/parmetis/include:/opt/metis/include:/opt/hypre/include:/opt/nn/include:/opt/csa/include:/opt/mmg/include:/opt/parmmg/include:/opt/amgx/include:/opt/lua/include:/opt/mumps/include:/opt/netcdf/include:/opt/hdf5/include:${CPATH:-}"
+    export CMAKE_PREFIX_PATH="/opt/elmer:/opt/gmsh:/opt/parmetis:/opt/metis:/opt/hypre:/opt/nn:/opt/csa:/opt/mmg:/opt/parmmg:/opt/amgx:/opt/lua:/opt/mumps:/opt/netcdf:/opt/hdf5:${CMAKE_PREFIX_PATH:-}"
 
     # -------------------------------------------------------------------------
     # METIS 5.1.0
@@ -408,6 +420,30 @@ EOF
     ldconfig
 
     # -------------------------------------------------------------------------
+    # MUMPS
+    # -------------------------------------------------------------------------
+    cd /opt/src
+    git clone --recursive https://github.com/scivision/mumps.git mumps
+    cd /opt/src/mumps
+    mkdir -p build
+    cd build
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=/opt/mumps \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_DOUBLE=ON \
+        -DBUILD_COMPLEX=ON \
+        -DBUILD_COMPLEX16=ON \
+        -DCMAKE_C_COMPILER=mpicc \
+        -DCMAKE_CXX_COMPILER=mpicxx \
+        -DCMAKE_Fortran_COMPILER=mpif90
+    cmake --build . --parallel "${JOBS}"
+    cmake --install .
+    find /opt/mumps -iname "*mumps*config.cmake" -o -iname "*Mumps*Config.cmake"
+    cd /
+    rm -rf /opt/src/mumps
+    ldconfig
+
+    # -------------------------------------------------------------------------
     # Elmer FEM / ElmerIce at same commit as the Ubuntu/Thea recipe
     # -------------------------------------------------------------------------
     NETCDF_C_LIB="$(find /opt/netcdf/lib -maxdepth 1 -name 'libnetcdf.so*' | sort | head -n1)"
@@ -418,10 +454,13 @@ EOF
     if [ -z "${AMGX_LIBRARY}" ]; then
         AMGX_LIBRARY="$(find /opt/amgx/lib -maxdepth 1 -name 'libamgxsh.so' | head -n1)"
     fi
+    # Ask rpm where it actually put cudss-config.cmake
+    CUDSS_CMAKE_DIR="$(dirname "$(rpm -ql libcudss0-devel-cuda-12 | grep '/cudss-config\.cmake$')")"
 
     test -n "${NETCDF_C_LIB}"
     test -n "${NETCDF_F_LIB}"
     test -n "${AMGX_LIBRARY}"
+    test -n "${CUDSS_CMAKE_DIR}"
 
     ELMER_FFLAGS="-g -O2 -fPIC -fopenmp"
     if [ "${ENABLE_NVPTX_OFFLOAD}" = "1" ]; then
@@ -429,7 +468,7 @@ EOF
     fi
 
     cd /opt/src
-    git clone --recursive --branch devel https://github.com/ElmerCSC/elmerfem.git elmerfem
+    git clone --recursive --branch feat-add-cudss https://github.com/dancaseb/elmerfem.git elmerfem
     cd /opt/src/elmerfem
     git submodule update --init --recursive
 
@@ -490,7 +529,9 @@ PY_ZOLTAN_GCC14_PATCH
         -DWITH_MPI=TRUE \
         -DWITH_LUA=TRUE \
         -DWITH_OpenMP=TRUE \
-        -DWITH_Mumps=FALSE \
+        -DWITH_Mumps=TRUE \
+        -DMumps_INCLUDE_DIR=/opt/mumps/include \
+        -DMumps_LIBRARIES="/opt/mumps/lib64/libdmumps.so;/opt/mumps/lib64/libzmumps.so;/opt/mumps/lib64/libsmumps.so;/opt/mumps/lib64/libcmumps.so;/opt/mumps/lib64/libmumps_common.so;/opt/mumps/lib64/libpord.so;/opt/mumps/lib64/libscalapack.so" \
         -DWITH_Hypre=TRUE \
         -DHYPRE_INCLUDE_DIR=/opt/hypre/include \
         -DHYPRE_LIBRARY=/opt/hypre/lib/libHYPRE.so \
@@ -518,6 +559,8 @@ PY_ZOLTAN_GCC14_PATCH
         -DCUDA_LIBDIR="${CUDA_HOME}/lib64" \
         -DCUDA_INCLUDE_DIR="${CUDA_HOME}/include" \
         -DCUDA_ARCH="${CUDA_ARCH}" \
+        -DWITH_CUDSS=TRUE \
+        -Dcudss_DIR="${CUDSS_CMAKE_DIR}" \
         -DCSA_LIBRARY=/opt/csa/lib/libcsa.a \
         -DCSA_INCLUDE_DIR=/opt/csa/include \
         -DNN_LIBRARY=/opt/nn/lib/libnn.a \
@@ -548,10 +591,10 @@ PY_ZOLTAN_GCC14_PATCH
     CUDA_HOME="${CUDA_HOME:-${CUDA_PATH:-/usr/local/cuda}}"
     export CUDA_HOME
     export PATH=/opt/elmer/bin:/opt/gmsh/bin:/opt/parmetis/bin:/opt/metis/bin:/opt/hypre/bin:/opt/nn/bin:/opt/csa/bin:/opt/mmg/bin:/opt/parmmg/bin:/opt/lua/bin:/opt/netcdf/bin:/opt/hdf5/bin:/usr/local/bin:${CUDA_HOME}/bin:$PATH
-    export LD_LIBRARY_PATH=/opt/elmer/lib:/opt/gmsh/lib:/opt/parmetis/lib:/opt/metis/lib:/opt/hypre/lib:/opt/nn/lib:/opt/csa/lib:/opt/mmg/lib64:/opt/mmg/lib:/opt/parmmg/lib64:/opt/parmmg/lib:/opt/amgx/lib:/opt/lua/lib:/opt/netcdf/lib:/opt/hdf5/lib:${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
-    export LIBRARY_PATH=/opt/elmer/lib:/opt/gmsh/lib:/opt/parmetis/lib:/opt/metis/lib:/opt/hypre/lib:/opt/nn/lib:/opt/csa/lib:/opt/mmg/lib64:/opt/mmg/lib:/opt/parmmg/lib64:/opt/parmmg/lib:/opt/amgx/lib:/opt/lua/lib:/opt/netcdf/lib:/opt/hdf5/lib:${CUDA_HOME}/lib64:$LIBRARY_PATH
-    export CPATH=/opt/parmetis/include:/opt/metis/include:/opt/hypre/include:/opt/nn/include:/opt/csa/include:/opt/mmg/include:/opt/parmmg/include:/opt/amgx/include:/opt/lua/include:/opt/netcdf/include:/opt/hdf5/include:${CUDA_HOME}/include:$CPATH
-    export CMAKE_PREFIX_PATH=/opt/elmer:/opt/gmsh:/opt/parmetis:/opt/metis:/opt/hypre:/opt/nn:/opt/csa:/opt/mmg:/opt/parmmg:/opt/amgx:/opt/lua:/opt/netcdf:/opt/hdf5:$CMAKE_PREFIX_PATH
+    export LD_LIBRARY_PATH=/opt/elmer/lib:/opt/gmsh/lib:/opt/parmetis/lib:/opt/metis/lib:/opt/hypre/lib:/opt/nn/lib:/opt/csa/lib:/opt/mmg/lib64:/opt/mmg/lib:/opt/parmmg/lib64:/opt/parmmg/lib:/opt/amgx/lib:/opt/lua/lib:/opt/mumps/lib64:/opt/mumps/lib:/opt/netcdf/lib:/opt/hdf5/lib:${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+    export LIBRARY_PATH=/opt/elmer/lib:/opt/gmsh/lib:/opt/parmetis/lib:/opt/metis/lib:/opt/hypre/lib:/opt/nn/lib:/opt/csa/lib:/opt/mmg/lib64:/opt/mmg/lib:/opt/parmmg/lib64:/opt/parmmg/lib:/opt/amgx/lib:/opt/lua/lib:/opt/mumps/lib64:/opt/mumps/lib:/opt/netcdf/lib:/opt/hdf5/lib:${CUDA_HOME}/lib64:$LIBRARY_PATH
+    export CPATH=/opt/parmetis/include:/opt/metis/include:/opt/hypre/include:/opt/nn/include:/opt/csa/include:/opt/mmg/include:/opt/parmmg/include:/opt/amgx/include:/opt/lua/include:/opt/mumps/include:/opt/netcdf/include:/opt/hdf5/include:${CUDA_HOME}/include:$CPATH
+    export CMAKE_PREFIX_PATH=/opt/elmer:/opt/gmsh:/opt/parmetis:/opt/metis:/opt/hypre:/opt/nn:/opt/csa:/opt/mmg:/opt/parmmg:/opt/amgx:/opt/lua:/opt/mumps:/opt/netcdf:/opt/hdf5:$CMAKE_PREFIX_PATH
 
 %runscript
     . /opt/activate.sh
