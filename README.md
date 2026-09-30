@@ -7,6 +7,11 @@ The container installs
 3. AMGX on commit 3188dce5bdc22e96407d609e398925bed6aa010d (newer commit wasn't tested)
 4. Elmer branch devel
 
+Elmer_roihu_talp.def
+In addition to Elmer_roihu.def, it installs libraries necessary for running TALP:
+1. PAPI
+2. DLB
+
 Elmer_roihu_cudss_mumps.def:
 In addition to Elmer_roihu.def, it installs:
 1. cuDSS (GPU direct sparse solver)
