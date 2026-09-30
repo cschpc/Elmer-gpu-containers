@@ -468,7 +468,7 @@ EOF
     fi
 
     cd /opt/src
-    git clone --recursive --branch feat-add-cudss https://github.com/dancaseb/elmerfem.git elmerfem
+    git clone --recursive --branch devel https://github.com/ElmerCSC/elmerfem.git elmerfem
     cd /opt/src/elmerfem
     git submodule update --init --recursive
 
